@@ -25,3 +25,8 @@ class FileStoreCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = FileSearchStore
         fields = ['title', 'file', 'user', 'status']
+
+class FileSearchStoreListDisplaySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = FileSearchStore
+        fields = ['id', 'title',]
