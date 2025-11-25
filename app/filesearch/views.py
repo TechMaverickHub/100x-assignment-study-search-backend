@@ -172,27 +172,58 @@ class QueryDocumentView(GenericAPIView):
 
         try:
             client = GeminiClientWrapper()
-            response = client.query_store(document.store_name, query)
 
-            # Extract response text and grounding sources (best-effort)
-            text = getattr(response, 'text', None) or (
-                getattr(response, 'candidates', [None])[0].content if getattr(response, 'candidates', None) else '')
-            grounding_sources = []
+            # Add system instruction: forbid hallucination
+            system_prompt = (
+                "You must answer ONLY using the provided document chunks. "
+                "If the answer is not explicitly present in the document, reply exactly with: "
+                "'I don't know. The answer is not present in the document.'"
+            )
+
+            response = client.query_store(
+                document.store_name,
+                f"{system_prompt}\n\nUser question: {query}"
+            )
+
+            # --- Extract text output ---
+            text_output = None
+            if hasattr(response, "text") and response.text:
+                text_output = response.text
+            else:
+                # fallback to candidates
+                try:
+                    text_output = response.candidates[0].content[0].text
+                except Exception:
+                    text_output = ""
+
+            # --- Extract grounding chunks (actual retrieved text, not titles) ---
+            grounding_chunks = []
             try:
                 grounding = response.candidates[0].grounding_metadata
-                if grounding:
-                    grounding_sources = [c.retrieved_context.title for c in grounding.grounding_chunks]
+                if grounding and grounding.grounding_chunks:
+                    grounding_chunks = [
+                        c.retrieved_context.text for c in grounding.grounding_chunks
+                        if hasattr(c, "retrieved_context") and c.retrieved_context.text
+                    ]
             except Exception:
-                grounding_sources = []
+                grounding_chunks = []
+
+            # --- Enforce “no hallucination” rule ---
+            if not grounding_chunks:
+                text_output = "I don't know. The answer is not present in the document."
 
             return_data = {
-                'query': query,
-                'response_text': text,
-                'grounding_sources': grounding_sources,
-                'document_id': str(document.id),
+                "query": query,
+                "response_text": text_output,
+                "grounding_chunks": grounding_chunks,
+                "document_id": str(document.id),
             }
 
-            return get_response_schema(return_data, SuccessMessage.RECORD_RETRIEVED.value, status.HTTP_200_OK)
+            return get_response_schema(
+                return_data,
+                SuccessMessage.RECORD_RETRIEVED.value,
+                status.HTTP_200_OK
+            )
 
         except Exception as e:
             logger.exception('Error querying document')
