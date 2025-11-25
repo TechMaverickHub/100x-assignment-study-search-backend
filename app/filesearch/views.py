@@ -12,17 +12,19 @@ from permissions import IsUser
 from .gemini_client import GeminiClientWrapper
 from .models import FileSearchStore
 from .processing import process_file_search_store
-from .serializers import FileSearchStoreSerializer, FileUploadSerializer, QuerySerializer
+from .serializers import FileSearchStoreSerializer, FileUploadSerializer, QuerySerializer, FileStoreCreateSerializer, \
+    FileSearchStoreListDisplaySerializer
+from ..core.views import CustomPageNumberPagination
 
 
 class TestAPIView(GenericAPIView):
 
     def post(self, request):
-
-       return get_response_schema({}, SuccessMessage.RECORD_UPDATED.value, status.HTTP_200_OK)
+        return get_response_schema({}, SuccessMessage.RECORD_UPDATED.value, status.HTTP_200_OK)
 
 
 import logging
+
 logger = logging.getLogger(__name__)
 
 
@@ -60,8 +62,10 @@ class DocumentUploadView(GenericAPIView):
     @swagger_auto_schema(
         operation_description='Upload a PDF file for ingestion. The file will be processed synchronously.',
         manual_parameters=[
-            openapi.Parameter(name='file', in_=openapi.IN_FORM, type=openapi.TYPE_FILE, required=True, description='PDF file to upload'),
-            openapi.Parameter(name='title', in_=openapi.IN_FORM, type=openapi.TYPE_STRING, required=False, description='Title for the document (defaults to filename)'),
+            openapi.Parameter(name='file', in_=openapi.IN_FORM, type=openapi.TYPE_FILE, required=True,
+                              description='PDF file to upload'),
+            openapi.Parameter(name='title', in_=openapi.IN_FORM, type=openapi.TYPE_STRING, required=False,
+                              description='Title for the document (defaults to filename)'),
         ],
         responses={201: openapi.Response('Document created successfully', FileSearchStoreSerializer)}
     )
@@ -83,12 +87,16 @@ class DocumentUploadView(GenericAPIView):
             title = request.data.get('title') or uploaded_file.name
 
             # Create DB record with UPLOADING status (do NOT mark READY here)
-            document = FileSearchStore.objects.create(
-                user=request.user,
-                title=title,
-                file=uploaded_file,
-                status=FileSearchStore.StoreStatus.UPLOADING
-            )
+
+            request.data['user'] = request.user.id
+            request.data['status'] = FileSearchStore.StoreStatus.UPLOADING
+
+            serializer = FileStoreCreateSerializer(data=request.data)
+            if serializer.is_valid():
+                document = serializer.save()
+            else:
+                return get_response_schema(serializer.errors, ErrorMessage.BAD_REQUEST.value,
+                                           status.HTTP_400_BAD_REQUEST)
 
             # Synchronous processing: create Gemini store and upload file.
             # This will update document.status -> PROCESSING/READY/FAILED and set store_name or error_message.
@@ -98,7 +106,8 @@ class DocumentUploadView(GenericAPIView):
                 logger.exception("Processing failed for document %s", document.id)
                 # process_file_search_store already updates DB on failure; return the document state
                 serializer = FileSearchStoreSerializer(document)
-                return get_response_schema(serializer.data, ErrorMessage.SOMETHING_WENT_WRONG.value, status.HTTP_500_INTERNAL_SERVER_ERROR)
+                return get_response_schema(serializer.data, ErrorMessage.SOMETHING_WENT_WRONG.value,
+                                           status.HTTP_500_INTERNAL_SERVER_ERROR)
 
             serializer = FileSearchStoreSerializer(document)
             return get_response_schema(serializer.data, SuccessMessage.RECORD_CREATED.value, status.HTTP_201_CREATED)
@@ -118,7 +127,13 @@ class QueryDocumentView(GenericAPIView):
 
     @swagger_auto_schema(
         operation_description='Query the uploaded document(s) via Gemini file search',
-        request_body=QuerySerializer,
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            properties={
+                'query': openapi.Schema(type=openapi.TYPE_STRING, description='Query to run'),
+                'document_id': openapi.Schema(type=openapi.TYPE_INTEGER, description='Document ID to query (optional)'),
+            }
+        ),
         responses={200: 'Query result (text and grounding metadata)'}
     )
     def post(self, request):
@@ -127,47 +142,88 @@ class QueryDocumentView(GenericAPIView):
         query = serializer.validated_data['query']
         document_id = serializer.validated_data.get('document_id')
 
-        if document_id:
-            document = get_object_or_404(FileSearchStore, id=document_id, user=request.user)
-        else:
-            # get the latest READY document for user
-            document = FileSearchStore.objects.filter(user=request.user, status=FileSearchStore.StoreStatus.READY).order_by('-created').first()
-            if not document:
-                return_data = {
-                    settings.REST_FRAMEWORK['NON_FIELD_ERRORS_KEY']: [ErrorMessage.DOCUMENT_NOT_READY.value]
-                }
+        document = (
+            FileSearchStore.objects
+            .filter(
+                user=request.user,
+                id=document_id,
+                status=FileSearchStore.StoreStatus.READY,
+                is_active=True
+            )
+            .first()
+        )
 
-                return get_response_schema(return_data, ErrorMessage.BAD_REQUEST.value, status.HTTP_400_BAD_REQUEST)
+        if not document:
+            return get_response_schema(
+                {},
+                ErrorMessage.NOT_FOUND.value,
+                status.HTTP_404_NOT_FOUND
+            )
 
         if not document.store_name:
-            return_data = {
-                settings.REST_FRAMEWORK['NON_FIELD_ERRORS_KEY']: [ErrorMessage.DOCUMENT_NO_STORE.value]
-            }
-
-            return get_response_schema(return_data, ErrorMessage.BAD_REQUEST.value, status.HTTP_400_BAD_REQUEST)
+            return get_response_schema(
+                {
+                    settings.REST_FRAMEWORK['NON_FIELD_ERRORS_KEY']: [
+                        ErrorMessage.DOCUMENT_NO_STORE.value
+                    ]
+                },
+                ErrorMessage.BAD_REQUEST.value,
+                status.HTTP_400_BAD_REQUEST)
 
         try:
-                client = GeminiClientWrapper()
-                response = client.query_store(document.store_name, query)
+            client = GeminiClientWrapper()
 
-                # Extract response text and grounding sources (best-effort)
-                text = getattr(response, 'text', None) or (getattr(response, 'candidates', [None])[0].content if getattr(response, 'candidates', None) else '')
-                grounding_sources = []
+            # Add system instruction: forbid hallucination
+            system_prompt = (
+                "You must answer ONLY using the provided document chunks. "
+                "If the answer is not explicitly present in the document, reply exactly with: "
+                "'I don't know. The answer is not present in the document.'"
+            )
+
+            response = client.query_store(
+                document.store_name,
+                f"{system_prompt}\n\nUser question: {query}"
+            )
+
+            # --- Extract text output ---
+            text_output = None
+            if hasattr(response, "text") and response.text:
+                text_output = response.text
+            else:
+                # fallback to candidates
                 try:
-                    grounding = response.candidates[0].grounding_metadata
-                    if grounding:
-                        grounding_sources = [c.retrieved_context.title for c in grounding.grounding_chunks]
+                    text_output = response.candidates[0].content[0].text
                 except Exception:
-                    grounding_sources = []
+                    text_output = ""
 
-                return_data = {
-                    'query': query,
-                    'response_text': text,
-                    'grounding_sources': grounding_sources,
-                    'document_id': str(document.id),
-                }
+            # --- Extract grounding chunks (actual retrieved text, not titles) ---
+            grounding_chunks = []
+            try:
+                grounding = response.candidates[0].grounding_metadata
+                if grounding and grounding.grounding_chunks:
+                    grounding_chunks = [
+                        c.retrieved_context.text for c in grounding.grounding_chunks
+                        if hasattr(c, "retrieved_context") and c.retrieved_context.text
+                    ]
+            except Exception:
+                grounding_chunks = []
 
-                return get_response_schema(return_data, SuccessMessage.RECORD_RETRIEVED.value, status.HTTP_200_OK)
+            # --- Enforce “no hallucination” rule ---
+            if not grounding_chunks:
+                text_output = "I don't know. The answer is not present in the document."
+
+            return_data = {
+                "query": query,
+                "response_text": text_output,
+                "grounding_chunks": grounding_chunks,
+                "document_id": str(document.id),
+            }
+
+            return get_response_schema(
+                return_data,
+                SuccessMessage.RECORD_RETRIEVED.value,
+                status.HTTP_200_OK
+            )
 
         except Exception as e:
             logger.exception('Error querying document')
@@ -180,16 +236,50 @@ class QueryDocumentView(GenericAPIView):
 
 class FileSearchStoreListView(ListAPIView):
     permission_classes = [IsUser]
-    serializer_class = FileSearchStoreSerializer
+    serializer_class = FileSearchStoreListDisplaySerializer
+
+    pagination_class = CustomPageNumberPagination
 
     def get_queryset(self):
-        return FileSearchStore.objects.filter(user=self.request.user).order_by('-created')
+        queryset = FileSearchStore.objects.filter(user_id=self.request.user.id, is_active=True).order_by('-created')
+
+        # filter by title
+        title = self.request.query_params.get('title', None)
+        if title:
+            queryset = queryset.filter(title__istartswith=title)
+
+        return queryset
+
+    @swagger_auto_schema(
+        operation_description="Get File store list",
+        manual_parameters=[
+            openapi.Parameter('title', openapi.IN_QUERY, type=openapi.TYPE_STRING, description='Filter by title'),
+        ]
+    )
+    def get(self, request, *args, **kwargs):
+        return self.list(request, *args, **kwargs)
 
 
-class FileSearchStoreDetailView(RetrieveAPIView):
+class FileSearchStoreDetailView(GenericAPIView):
     permission_classes = [IsUser]
     serializer_class = FileSearchStoreSerializer
-    lookup_field = 'id'
 
-    def get_queryset(self):
-        return FileSearchStore.objects.filter(user=self.request.user)
+    def get_object(self, pk):
+        file_search_store = FileSearchStore.objects.filter(id=pk, user_id=self.request.user.id, is_active=True).order_by('-created')
+
+        if not file_search_store:
+            return None
+
+        return file_search_store.first()
+
+    def get(self, request, pk):
+
+        file_search_store = self.get_object(pk)
+        if not file_search_store:
+            return get_response_schema(
+                {},
+                ErrorMessage.NOT_FOUND.value,
+                status.HTTP_404_NOT_FOUND
+            )
+        serializer = self.get_serializer(file_search_store)
+        return get_response_schema(serializer.data, SuccessMessage.RECORD_RETRIEVED.value, status.HTTP_200_OK)
