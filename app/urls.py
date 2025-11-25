@@ -15,6 +15,7 @@ Including another URLconf
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
 import debug_toolbar
+from django.conf import settings
 from django.contrib import admin
 from django.urls import path, include
 # swagger imports
@@ -41,7 +42,9 @@ urlpatterns = [
 
     # App URLs
     path('api/user/', include('app.user.urls')),
-
-    # Documentation
-    path('swagger/', schema_view.with_ui('swagger', cache_timeout=0), name='schema-swagger-ui'),
+    path('api/ingestion/', include('app.ingestion.urls')),
 ]
+
+if settings.DEBUG:
+    # Documentation
+    urlpatterns += [path('swagger/', schema_view.with_ui('swagger', cache_timeout=0), name='schema-swagger-ui')]
