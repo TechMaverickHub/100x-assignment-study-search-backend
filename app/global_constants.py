@@ -23,6 +23,9 @@ class ErrorMessage(str, Enum):
     MISSING_FIELDS = "Fields Missing"
 
     THROTTLE_LIMIT_EXCEEDED = "Throttle Limit Exceeded"
+    PDF_FILE_REQUIRED = "PDF file is required."
+    DOCUMENT_NOT_READY = "No ready document found. Upload and wait for processing."
+    DOCUMENT_NO_STORE = "Document is not yet associated with a remote store"
 
 class GlobalValues(int, Enum):
 
