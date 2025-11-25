@@ -12,7 +12,7 @@ from permissions import IsUser
 from .gemini_client import GeminiClientWrapper
 from .models import FileSearchStore
 from .processing import process_file_search_store
-from .serializers import FileSearchStoreSerializer, FileUploadSerializer, QuerySerializer
+from .serializers import FileSearchStoreSerializer, FileUploadSerializer, QuerySerializer, FileStoreCreateSerializer
 
 
 class TestAPIView(GenericAPIView):
@@ -83,12 +83,15 @@ class DocumentUploadView(GenericAPIView):
             title = request.data.get('title') or uploaded_file.name
 
             # Create DB record with UPLOADING status (do NOT mark READY here)
-            document = FileSearchStore.objects.create(
-                user=request.user,
-                title=title,
-                file=uploaded_file,
-                status=FileSearchStore.StoreStatus.UPLOADING
-            )
+
+            request.data['user'] = request.user.id
+            request.data['status'] = FileSearchStore.StoreStatus.UPLOADING
+
+            serializer = FileStoreCreateSerializer(data=request.data)
+            if serializer.is_valid():
+                document = serializer.save()
+            else:
+                return get_response_schema(serializer.errors, ErrorMessage.BAD_REQUEST.value, status.HTTP_400_BAD_REQUEST)
 
             # Synchronous processing: create Gemini store and upload file.
             # This will update document.status -> PROCESSING/READY/FAILED and set store_name or error_message.

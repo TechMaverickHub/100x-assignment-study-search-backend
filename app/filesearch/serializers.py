@@ -10,14 +10,17 @@ class FileSearchStoreSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'user', 'store_name', 'status', 'error_message', 'created', 'updated']
 
 
-
-
 class FileUploadSerializer(serializers.Serializer):
     file = serializers.FileField()
     title = serializers.CharField(required=False, allow_blank=True)
 
 
-
-
 class QuerySerializer(serializers.Serializer):
     query = serializers.CharField()
+
+
+class FileStoreCreateSerializer(serializers.ModelSerializer):
+
+    class Meta:
+        model = FileSearchStore
+        fields = ['title', 'file', 'user', 'status']
