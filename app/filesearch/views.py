@@ -229,10 +229,26 @@ class FileSearchStoreListView(ListAPIView):
         return self.list(request, *args, **kwargs)
 
 
-class FileSearchStoreDetailView(RetrieveAPIView):
+class FileSearchStoreDetailView(GenericAPIView):
     permission_classes = [IsUser]
     serializer_class = FileSearchStoreSerializer
-    lookup_field = 'id'
 
-    def get_queryset(self):
-        return FileSearchStore.objects.filter(user=self.request.user)
+    def get_object(self, pk):
+        file_search_store = FileSearchStore.objects.filter(id=pk, user_id=self.request.user.id, is_active=True).order_by('-created')
+
+        if not file_search_store:
+            return None
+
+        return file_search_store.first()
+
+    def get(self, request, pk):
+
+        file_search_store = self.get_object(pk)
+        if not file_search_store:
+            return get_response_schema(
+                {},
+                ErrorMessage.NOT_FOUND.value,
+                status.HTTP_404_NOT_FOUND
+            )
+        serializer = self.get_serializer(file_search_store)
+        return get_response_schema(serializer.data, SuccessMessage.RECORD_RETRIEVED.value, status.HTTP_200_OK)

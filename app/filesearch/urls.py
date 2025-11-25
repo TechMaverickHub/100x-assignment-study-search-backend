@@ -10,6 +10,6 @@ urlpatterns = [
     path('upload/', DocumentUploadView.as_view(), name='filesearch-upload'),
     path('query/', QueryDocumentView.as_view(), name='filesearch-query'),
     path('stores/list-filter/', FileSearchStoreListView.as_view(), name='filesearch-list'),
-    path('stores/<int:id>/', FileSearchStoreDetailView.as_view(), name='filesearch-detail'),
+    path('stores/<int:pk>/', FileSearchStoreDetailView.as_view(), name='filesearch-detail'),
 ]
 
