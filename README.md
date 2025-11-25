@@ -1,56 +1,70 @@
-# PortfolioAI — Instant Personal Brand & Job-Readiness Suite
+# StudySearch
 
-## Problem
-Early-career engineers and career-switchers often face challenges such as:
+StudySearch is a simple, learning-focused Retrieval-Augmented Generation (RAG) application built using **Google Gemini File Search**. The goal of this project is to deeply understand grounded retrieval—ensuring that all answers come strictly from the uploaded documents, with zero hallucinations.
 
-- Lack of a polished online presence, spending days struggling with portfolios, résumés, and cover letters.
-- Generic job alerts that bury the few perfect openings in a flood of noise.
-- Ad-hoc interview preparation, leaving candidates unsure of real-world expectations.
+## 🚀 Features
 
-## Solution
-PortfolioAI is an AI-driven web application that transforms raw inputs (existing CV, LinkedIn URL, or a short Q&A) into:
+- Upload PDFs and ingest them into Gemini File Search
+- Create isolated file-search stores per user
+- Query documents with full grounding
+- Extract actual text chunks used by Gemini (not just titles)
+- Enforce **truth-first AI**: if the answer isn’t in the document, the system responds with  
+  *“I don't know. The answer is not present in the document.”*
+- Django REST Framework backend with clean, scalable APIs
 
-- A fully hosted portfolio site
-- ATS-ready résumé
-- Tailored cover letters
-- Personalized job alerts
+## 🧩 Architecture Overview
 
-It also provides an AI interviewer that offers real-time coaching and feedback.
+1. **Upload PDF** → stored in Django → uploaded to Gemini File Search  
+2. **Gemini store creation** → store_name generated per document  
+3. **Query API** → system prompt enforces grounded answers  
+4. **Grounding extraction** → retrieved_context.text chunks returned to user  
+5. **Frontend / Client App** → can render accurate grounded responses
 
-## Scope / Features
+## 📡 Core APIs
 
-### 1. AI Portfolio Builder
-- Accepts PDF/Word résumé or guided Q&A to generate a responsive, host-ready portfolio site.
-- Supports custom subdomains and exportable HTML for full control.
+### `POST /api/filesearch/upload/`
+Upload and ingest a PDF into Gemini File Search.
 
-### 2. AI CV Generator
-- Collects work history, skills, and metrics through dynamic interview prompts when no résumé exists.
-- Outputs ATS-friendly PDF or DOCX résumés.
+### `POST /api/filesearch/query/`
+Query the ingested document.  
+If the answer isn’t found, returns a safe fallback.
 
-### 3. AI Cover-Letter Writer
-- Generates job-specific letters using role descriptions + user portfolio data.
-- Includes editable tone presets for personalization.
+### `GET /api/filesearch/stores/list/`
+View all your uploaded documents.
 
-### 4. Résumé / Portfolio Optimizer
-- Real-time scoring and keyword gap analysis against target job descriptions.
-- Provides auto-rewrite suggestions to improve impact.
+## 🛡 Hallucination Prevention
 
-### 5. AI Mock Interviewer
-- Role-aware question sets (technical, behavioral) with live transcripts.
-- Tracks confidence metrics and gives actionable improvement tips.
+StudySearch forces Gemini to respond using only the retrieved chunks.  
+If no chunk supports the answer → the system automatically replies:
 
-### 6. Career Coaching & Skill Gap Analysis
-- Personalized AI-driven career guidance based on portfolio and job targets.
+```
+I don't know. The answer is not present in the document.
+```
 
-### 7. Job-Opening Alert Engine
-- Users select sources (LinkedIn, AngelList, Wellfound, company RSS, etc.), keywords, and alert frequency.
-- Delivers notifications via email & in-app, with an 'Apply-with-Profile' shortcut.
+This makes StudySearch ideal for learning real-world RAG behaviors.
 
-## Get Started
-1. Clone the repository
-2. Follow setup instructions in the `docs/` folder
-3. Start building your personal brand with AI-powered automation
+## 🛠 Tech Stack
+
+- **Python / Django**
+- **Django REST Framework**
+- **Google Gemini File Search**
+- **PostgreSQL (recommended)**
+- **Docker-ready structure (optional)**
+
+## 📘 Why This Project Exists
+
+RAG is powerful—but easy to misunderstand. StudySearch was built to explore:
+
+- How document grounding really works
+- What LLMs do when grounding is missing
+- How to enforce strict source adherence
+- Practical chunk extraction and retrieval flows
+
+## 📄 License
+
+MIT License
 
 ---
 
-**PortfolioAI** streamlines job readiness for engineers, turning hours of work into minutes.
+Feel free to fork, extend, or critique this project.  
+Always open to learning from the community!
