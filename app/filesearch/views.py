@@ -121,7 +121,13 @@ class QueryDocumentView(GenericAPIView):
 
     @swagger_auto_schema(
         operation_description='Query the uploaded document(s) via Gemini file search',
-        request_body=QuerySerializer,
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            properties={
+                'query': openapi.Schema(type=openapi.TYPE_STRING, description='Query to run'),
+                'document_id': openapi.Schema(type=openapi.TYPE_INTEGER, description='Document ID to query (optional)'),
+            }
+        ),
         responses={200: 'Query result (text and grounding metadata)'}
     )
     def post(self, request):
@@ -130,24 +136,33 @@ class QueryDocumentView(GenericAPIView):
         query = serializer.validated_data['query']
         document_id = serializer.validated_data.get('document_id')
 
-        if document_id:
-            document = get_object_or_404(FileSearchStore, id=document_id, user=request.user)
-        else:
-            # get the latest READY document for user
-            document = FileSearchStore.objects.filter(user=request.user, status=FileSearchStore.StoreStatus.READY).order_by('-created').first()
-            if not document:
-                return_data = {
-                    settings.REST_FRAMEWORK['NON_FIELD_ERRORS_KEY']: [ErrorMessage.DOCUMENT_NOT_READY.value]
-                }
+        document = (
+            FileSearchStore.objects
+            .filter(
+                user=request.user,
+                id=document_id,
+                status=FileSearchStore.StoreStatus.READY,
+                is_active=True
+            )
+            .first()
+        )
 
-                return get_response_schema(return_data, ErrorMessage.BAD_REQUEST.value, status.HTTP_400_BAD_REQUEST)
+        if not document:
+            return get_response_schema(
+                {},
+                ErrorMessage.NOT_FOUND.value,
+                status.HTTP_404_NOT_FOUND
+            )
 
         if not document.store_name:
-            return_data = {
-                settings.REST_FRAMEWORK['NON_FIELD_ERRORS_KEY']: [ErrorMessage.DOCUMENT_NO_STORE.value]
-            }
-
-            return get_response_schema(return_data, ErrorMessage.BAD_REQUEST.value, status.HTTP_400_BAD_REQUEST)
+            return get_response_schema(
+                {
+                    settings.REST_FRAMEWORK['NON_FIELD_ERRORS_KEY']: [
+                        ErrorMessage.DOCUMENT_NO_STORE.value
+                    ]
+                },
+                ErrorMessage.BAD_REQUEST.value,
+                status.HTTP_400_BAD_REQUEST)
 
         try:
                 client = GeminiClientWrapper()

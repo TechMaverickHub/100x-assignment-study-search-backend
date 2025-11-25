@@ -17,6 +17,7 @@ class FileUploadSerializer(serializers.Serializer):
 
 class QuerySerializer(serializers.Serializer):
     query = serializers.CharField()
+    document_id = serializers.IntegerField()
 
 
 class FileStoreCreateSerializer(serializers.ModelSerializer):
