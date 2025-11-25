@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from app.ingestion.models import FileSearchStore
+from app.filesearch.models import FileSearchStore
 
 
 class FileSearchStoreSerializer(serializers.ModelSerializer):

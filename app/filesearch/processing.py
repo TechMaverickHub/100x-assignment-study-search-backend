@@ -1,7 +1,7 @@
 from django.shortcuts import get_object_or_404
 
-from app.ingestion.gemini_client import GeminiClientWrapper
-from app.ingestion.models import FileSearchStore
+from app.filesearch.gemini_client import GeminiClientWrapper
+from app.filesearch.models import FileSearchStore
 
 
 def process_file_search_store(store_id):

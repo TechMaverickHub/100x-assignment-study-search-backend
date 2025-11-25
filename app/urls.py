@@ -42,7 +42,7 @@ urlpatterns = [
 
     # App URLs
     path('api/user/', include('app.user.urls')),
-    path('api/ingestion/', include('app.ingestion.urls')),
+    path('api/filesearch/', include('app.filesearch.urls')),
 ]
 
 if settings.DEBUG:
