@@ -25,9 +25,9 @@ from rest_framework import permissions
 
 schema_view = get_schema_view(
     openapi.Info(
-        title="Demo starter project",
+        title="Study search Project",
         default_version='v1',
-        description="Demo starter project for Django Rest Framework",
+        description="A simple RAG implementation using Gemini file search",
         terms_of_service="https://www.google.com/policies/terms/",
         contact=openapi.Contact(email="contact@snippets.local"),
         license=openapi.License(name="BSD License"),
